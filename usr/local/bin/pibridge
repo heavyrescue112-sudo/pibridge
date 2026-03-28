@@ -15,27 +15,35 @@ fi
 # --- BRIDGE CONFIG ---
 WIFI_IFACE="wlan0"
 ETH_IFACE="eth0"
-# Keeping it in the .68 range to match your Pi's Wi-Fi (.68.82)
 ETH_IP="192.168.68.250/22" 
 
-# 1. Force NetworkManager to release the port
-nmcli device set "$ETH_IFACE" managed no 2>/dev/null
+# 1. Kill old services to avoid conflicts
+systemctl stop dhcp-helper 2>/dev/null
+killall parprouted 2>/dev/null 
 
-# 2. Reset and Configure the Physical Port
+# 2. Reset the Ethernet Port
+nmcli device set "$ETH_IFACE" managed no 2>/dev/null
 ip link set "$ETH_IFACE" down
 ip addr flush dev "$ETH_IFACE"
 ip link set "$ETH_IFACE" up
 ip addr add "$ETH_IP" dev "$ETH_IFACE"
 
-# 3. Enable Kernel IP Forwarding
+# 3. UNLOCK THE KERNEL (The "Secret Sauce")
+# This allows the Pi to answer ARP requests on behalf of your desktop
+echo 1 > /proc/sys/net/ipv4/conf/all/proxy_arp
+echo 1 > /proc/sys/net/ipv4/conf/$WIFI_IFACE/proxy_arp
+echo 1 > /proc/sys/net/ipv4/conf/$ETH_IFACE/proxy_arp
 sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
-# 4. Start the Proxy ARP engine (The Bridge)
-killall parprouted 2>/dev/null 
-sleep 1
+# 4. Open the "Ears" (Promiscuous Mode)
+# This lets the Pi accept packets not addressed to its own MAC
+ip link set "$WIFI_IFACE" promisc on
+ip link set "$ETH_IFACE" promisc on
+
+# 5. Start the Bridge Engine
 parprouted "$WIFI_IFACE" "$ETH_IFACE"
 
-# 5. Configure & Restart the DHCP Helper
-# We are forcing it to listen on ETH and relay to WIFI
+# 6. Configure & Restart DHCP Helper
+# We force it to listen on the cable (eth0) and talk to the air (wlan0)
 echo "DHCPHELPER_OPTS=\"-i $ETH_IFACE -b $WIFI_IFACE\"" | sudo tee /etc/default/dhcp-helper > /dev/null
-systemctl restart dhcp-helper
+systemctl start dhcp-helper
