@@ -17,33 +17,34 @@ WIFI_IFACE="wlan0"
 ETH_IFACE="eth0"
 ETH_IP="192.168.68.250/22" 
 
-# 1. Kill old services
+# 1. Clear old states
 systemctl stop dhcp-helper 2>/dev/null
 killall parprouted 2>/dev/null 
 
-# 2. Reset the Ethernet Port
+# 2. Reset Ethernet
 nmcli device set "$ETH_IFACE" managed no 2>/dev/null
 ip link set "$ETH_IFACE" down
 ip addr flush dev "$ETH_IFACE"
 ip link set "$ETH_IFACE" up
 ip addr add "$ETH_IP" dev "$ETH_IFACE"
 
-# Wait for the link to stabilize
 sleep 2
 
-# 3. THE ROBUST KERNEL FIX
+# 3. Apply Persistent Kernel Settings
 sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv4.conf.all.proxy_arp=1
 sysctl -w net.ipv4.conf.$WIFI_IFACE.proxy_arp=1
 sysctl -w net.ipv4.conf.$ETH_IFACE.proxy_arp=1
 
-# 4. Open the "Ears"
+# 4. Promiscuous Mode
 ip link set "$WIFI_IFACE" promisc on
 ip link set "$ETH_IFACE" promisc on
 
-# 5. Start the engine
+# 5. Start the Engine
 parprouted "$WIFI_IFACE" "$ETH_IFACE"
 
-# 6. Kick the Helper
-echo "DHCPHELPER_OPTS=\"-i $ETH_IFACE -b $WIFI_IFACE\"" | sudo tee /etc/default/dhcp-helper > /dev/null
+# 6. DIRECT RELAY (The Fix)
+# We find your router's IP and tell dhcp-helper to talk to it directly
+ROUTER_IP=$(ip route | grep default | awk '{print $3}' | head -n 1)
+echo "DHCPHELPER_OPTS=\"-i $ETH_IFACE -s $ROUTER_IP\"" | sudo tee /etc/default/dhcp-helper > /dev/null
 systemctl start dhcp-helper
